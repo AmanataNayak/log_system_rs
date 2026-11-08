@@ -1,8 +1,11 @@
 mod service;
 mod buffer;
+mod arrow;
+mod parquet_writer;
 
 use std::net::SocketAddr;
 use std::time::Duration;
+use clap::builder::Str;
 use tokio::sync::mpsc;
 use clap::Parser;
 use tracing::Level;
@@ -25,7 +28,10 @@ struct Args {
     batch_size: usize,
 
     #[arg(short, long, default_value = "5")]
-    flush_interval: u64
+    flush_interval: u64,
+
+    #[arg(short, long, default_value = "data/parquet")]
+    output_dir: String
 }
 
 
@@ -41,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     let max_batch_size = args.batch_size;
     let max_flush_interval = args.flush_interval;
+    let output_dir = args.output_dir;
 
     let (tx, rx) = mpsc::channel::<LogEvent>(1000);
     let config = BatchConfig{
@@ -49,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     };
 
     // Spawn background micro-batching flusher task
-    tokio::spawn(run_batch_flusher(rx, config));
+    tokio::spawn(run_batch_flusher(rx, config, output_dir));
 
     let addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse()?;
     let service = IngestionServer::new(tx);

@@ -1,11 +1,15 @@
 use std::time::Duration;
+use arrow::array::RecordBatch;
+use arrow::error::ArrowError;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 use common::log_system::log_ingestion_service_server::LogIngestionService;
 use common::log_system::{IngestResponse, LogEvent};
 use tonic::{Request, Response, Status, Streaming};
-use tracing::info;
+use tracing::{info, error};
+use crate::arrow::events_record_batch;
 use crate::buffer::{BatchConfig, LogBuffer};
+use crate::parquet_writer::ParquetWriter;
 
 #[derive(Debug)]
 pub struct IngestionServer {
@@ -47,7 +51,7 @@ impl LogIngestionService for IngestionServer {
 }
 
 
-pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchConfig) {
+pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchConfig, output_dir: String) {
     let interval_sec = config.max_flush_interval.as_secs();
     let mut buffer = LogBuffer::new(config);
     let mut ticker = interval(Duration::from_secs(interval_sec));
@@ -59,7 +63,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
                 match maybe_event {
                     Some(event) => {
                         if let Some(batch) = buffer.push(event) {
-                            flush_batch(batch).await;
+                            flush_batch(batch, &output_dir).await;
                             ticker.reset();
                         }
                     }
@@ -67,7 +71,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
                         // gRPC stream closed: flush any remaining logs and exit
                         let final_batch = buffer.drain();
                         if !final_batch.is_empty() {
-                            flush_batch(final_batch).await;
+                            flush_batch(final_batch, &output_dir).await;
                         }
                         break;
                     }
@@ -79,7 +83,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
                 let batch = buffer.drain();
                 if !batch.is_empty() {
                     info!("Flush triggered by timer timeout (count: {})", batch.len());
-                    flush_batch(batch).await;
+                    flush_batch(batch, &output_dir).await;
                 }
             }
         }
@@ -88,7 +92,22 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
 }
 
 
-async fn flush_batch(batch: Vec<LogEvent>) {
-    info!("Flushing micro-batch of {} events to storage layer", batch.len());
-    // Next step: Convert batch to Apache Arrow RecordBatch and write Parquet!
+async fn flush_batch(batch: Vec<LogEvent>, output_dir: &str) {
+    let count = batch.len();
+    info!(target: "ingestion", "Flushing micro-batch of {} events...", count);
+
+    match events_record_batch(&batch) {
+        Ok(record_batch) => {
+
+            let writer = ParquetWriter::new(output_dir).expect("Failed to create output directory");
+
+            if let Err(err) = writer.write_batch(&record_batch) {
+                error!(target: "ingestion", "Failed to write Parquet file: {}", err);
+            }
+        }
+        Err(err) => {
+            error!(target: "ingestion", "Failed to convert log events to Arrow RecordBatch: {}", err);
+        }
+    }
+
 }
