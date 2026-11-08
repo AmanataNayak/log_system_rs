@@ -6,16 +6,6 @@ pub struct BatchConfig {
     pub max_flush_interval: Duration
 }
 
-impl Default for BatchConfig {
-    fn default() -> Self {
-        Self {
-            max_batch_size: 1000,
-            max_flush_interval: Duration::from_secs(5)
-        }
-    }
-}
-
-
 pub struct LogBuffer {
     config: BatchConfig,
     events: Vec<LogEvent>
