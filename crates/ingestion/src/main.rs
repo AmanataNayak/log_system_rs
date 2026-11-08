@@ -2,6 +2,7 @@ mod service;
 mod buffer;
 mod arrow;
 mod parquet_writer;
+mod iceberg_catalog;
 
 use std::net::SocketAddr;
 use std::time::Duration;

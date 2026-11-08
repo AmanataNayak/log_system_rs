@@ -9,6 +9,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, error};
 use crate::arrow::events_record_batch;
 use crate::buffer::{BatchConfig, LogBuffer};
+use crate::iceberg_catalog::IcebergCatalogManager;
 use crate::parquet_writer::ParquetWriter;
 
 #[derive(Debug)]
@@ -101,8 +102,25 @@ async fn flush_batch(batch: Vec<LogEvent>, output_dir: &str) {
 
             let writer = ParquetWriter::new(output_dir).expect("Failed to create output directory");
 
-            if let Err(err) = writer.write_batch(&record_batch) {
-                error!(target: "ingestion", "Failed to write Parquet file: {}", err);
+            match writer.write_batch(&record_batch) {
+                Ok(file_path) => {
+                    let metadata = std::fs::metadata(&file_path).unwrap();
+                    let data_file = IcebergCatalogManager::create_data_file_entry(
+                        file_path.to_str().unwrap(),
+                        metadata.len(),
+                        record_batch.num_rows() as u64
+                    );
+
+                    info!(
+                        target: "ingestion",
+                        "Committed DataFile manifest entry to Iceberg snapshot: path={}, records={}",
+                        data_file.file_path(),
+                        data_file.record_count()
+                    );
+                }
+                Err(err) => {
+                    error!(target: "ingestion", "Failed to write Parquet file: {}", err);
+                }
             }
         }
         Err(err) => {

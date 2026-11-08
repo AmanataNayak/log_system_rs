@@ -4,7 +4,7 @@ members = [
     "crates/common",
     "crates/collector",
     "crates/ingestion"
-]
+, "crates/query_engine"]
 
 [workspace.dependencies]
 tokio = { version = "1.38", features = ["full"]}
