@@ -1,0 +1,13 @@
+[package]
+name = "query_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+datafusion = "38.0"
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum = "0.8"
+serde.workspace = true
+serde_json.workspace = true
