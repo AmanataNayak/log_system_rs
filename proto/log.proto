@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package log_system;
+
+// Log severity enum matching
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_TRACE = 1;
+  LOG_LEVEL_DEBUG = 2;
+  LOG_LEVEL_INFO = 3;
+  LOG_LEVEL_WARN = 4;
+  LOG_LEVEL_ERROR = 5;
+  LOG_LEVEL_FATAL = 6;
+}
+
+// Structured log event transferred
+message LogEvent {
+  int64 timestamp_micros = 1;
+  string service_name = 2;
+  LogLevel log_level = 3;
+  string message = 4;
+  optional string error = 5;
+  optional string module = 6;
+  optional string function = 7;
+  optional uint32 line_no = 8;
+  map<string, string> metadata = 9;
+}
+
+message IngestResponse {
+  bool success = 1;
+  uint64 count = 2; // Number of logs successfully processed.
+  optional string error_message = 3; // Populated if ingestion failed
+}
+
+service LogIngestionService {
+  // Client-side streaming: Collector streams logs continuously; Ingestion responds on stream completion
+  rpc StreamLogs(stream LogEvent) returns (IngestResponse);
+}
+

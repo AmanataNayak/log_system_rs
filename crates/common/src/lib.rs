@@ -1,9 +1,11 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 use std::str::FromStr;
-use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+
+mod client;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -55,4 +57,9 @@ pub struct LogEvent {
     pub function: Option<String>,
     pub line_no: Option<u32>,
     pub metadata: HashMap<String, String>
+}
+
+
+pub mod log_system {
+    tonic::include_proto!("log_system");
 }

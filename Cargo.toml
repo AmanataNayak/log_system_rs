@@ -2,7 +2,8 @@
 resolver = "3"
 members = [
     "crates/common",
-    "crates/collector"
+    "crates/collector",
+    "crates/ingestion"
 ]
 
 [workspace.dependencies]
@@ -13,3 +14,5 @@ chrono = { version = "0.4", features = ["serde"]}
 async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tonic = "0.11"
+prost = "0.12"

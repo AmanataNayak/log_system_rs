@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 serde.workspace = true
 chrono.workspace = true
+tonic.workspace = true
+prost.workspace = true
+
+[build-dependencies]
+tonic-build = "0.11"
