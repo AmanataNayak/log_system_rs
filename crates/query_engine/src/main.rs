@@ -1,3 +1,6 @@
+mod catalog;
+mod subscriber;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use axum::extract::State;
@@ -5,10 +8,12 @@ use axum::{Json, Router};
 use axum::http::StatusCode;
 use axum::routing::post;
 use datafusion::arrow::json::ArrayWriter;
-use datafusion::prelude::{ParquetReadOptions, SessionContext};
+use datafusion::prelude::{SessionContext, SessionConfig};
 use serde::{Serialize, Deserialize};
 use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
+use iceberg::Catalog;
+use crate::subscriber::start_invalidation_listener;
 
 #[derive(Clone)]
 struct AppState {
@@ -38,19 +43,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .finish();
     tracing::subscriber::set_global_default(subscriber).ok();
 
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/iceberg_catalog".to_string());
+    let warehouse_dir = "data/iceberg_warehouse";
+
     info!(target: "query_engine", "Initializing DataFusion engine...");
 
-    let ctx = SessionContext::new();
+    let config = SessionConfig::new()
+        .with_default_catalog_and_schema("iceberg", "log_db");
+    let ctx = SessionContext::new_with_config(config);
 
-    // Register all local parquet files under table name `log_events`
-    let parquet_option = ParquetReadOptions::default();
-    ctx.register_parquet(
-        "log_events",
-        "data/parquet/*.parquet",
-        parquet_option
-    ).await?;
 
-    info!(target: "query_engine", "Registered 'data/parquet/*.parquet' as table 'log_events'");
+
+    // Register iceberg tables
+    let catalog_arc: Arc<dyn Catalog> = catalog::register_iceberg_tables(&ctx, &db_url, warehouse_dir).await.map_err(anyhow::Error::from_boxed)?;
+    info!(target: "query_engine", "Registered Iceberg catalog into DataFusion context");
+
+    // Starting the background subscirber
+    let topic = "log.iceberg.event".to_string();
+    let subscriber = "log_query_engine_sub".to_string();
+
+    if let Err(err) = start_invalidation_listener(
+        topic,
+        subscriber,
+        ctx.clone(),
+        catalog_arc,
+    ).await {
+        error!(target: "query_engine", "Failed to start pub_sub_rs invalidation listener: {}", err);
+    };
+
 
     let state = AppState {
         ctx: Arc::new(ctx)
@@ -62,6 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = SocketAddr::from(([0,0,0,0], 8080));
     info!(target: "query_engine", "Query engine REST API running on http://{}", addr);
+
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

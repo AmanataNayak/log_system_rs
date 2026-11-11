@@ -5,13 +5,16 @@ use iceberg_catalog_sql::{SqlCatalog, SQL_CATALOG_PROP_URI, SQL_CATALOG_PROP_WAR
 use iceberg::Catalog;
 use iceberg::io::{LocalFsStorageFactory};
 use iceberg::spec::DataFile;
-use tracing::info;
+use tracing::{info, warn};
 use crate::iceberg_catalog::IcebergCatalogManager;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
+use common::event::TableCommitEvent;
+use crate::pubshiler::InvalidationPublisher;
 
 pub struct PostgresIcebergCatalogManger {
     catalog: SqlCatalog,
-    table_ident: TableIdent
+    table_ident: TableIdent,
+    publisher: InvalidationPublisher
 }
 
 
@@ -38,9 +41,12 @@ impl PostgresIcebergCatalogManger {
         let namespace = NamespaceIdent::new(namespace.to_string());
         let table_ident = TableIdent::new(namespace, table_name.to_string());
 
+        let publisher = InvalidationPublisher::connect("log.iceberg.event").await?;
+
         let manager = Self {
             catalog,
-            table_ident
+            table_ident,
+            publisher
         };
         manager.ensure_table_exists().await?;
         Ok(manager)
@@ -86,6 +92,21 @@ impl PostgresIcebergCatalogManger {
         append = append.add_data_files(vec![data_file]);
         tx = append.apply(tx)?;
         tx.commit(&self.catalog).await?;
+
+        let snapshot_id = table.metadata().current_snapshot_id().unwrap_or(-1);
+
+        // Published event
+        let event = TableCommitEvent {
+            catalog_name: "postgres_catalog".to_string(),
+            namespace: self.table_ident.namespace().to_string(),
+            table_name: self.table_ident.name().to_string(),
+            snapshot_id,
+            timestamp_ms: chrono::Utc::now().timestamp_millis(),
+        };
+
+        if let Err(err) =self.publisher.publish_commit(&event).await {
+            warn!(target: "ingestion", "Failed to publish commit invalidation event: {}", err);
+        }
 
         info!(target: "ingestion", "Successfully committed snapshot transaction via Postgres SqlCatalog!");
         Ok(())

@@ -6,6 +6,7 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 
 mod client;
+pub mod event;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -62,4 +63,8 @@ pub struct LogEvent {
 
 pub mod log_system {
     tonic::include_proto!("log_system");
+}
+
+pub mod pubsub {
+    tonic::include_proto!("pubsub");
 }

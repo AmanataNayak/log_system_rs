@@ -4,6 +4,7 @@ mod arrow;
 mod parquet_writer;
 mod iceberg_catalog;
 mod sql_catalog;
+mod pubshiler;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

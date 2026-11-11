@@ -14,7 +14,8 @@ clap = { version = "4.4", features = ["derive", "env"] }
 serde_json = "1.0"
 arrow = "58"
 parquet = "58"
-iceberg = "0.11.0"
-iceberg-catalog-sql = "0.11.0"
-sqlx = { version = "0.8", default-features = false, features = ["any", "postgres", "runtime-tokio"] }
 anyhow = "1.0.104"
+iceberg.workspace = true
+iceberg-catalog-sql.workspace = true
+sqlx.workspace = true
+chrono = "0.4.45"

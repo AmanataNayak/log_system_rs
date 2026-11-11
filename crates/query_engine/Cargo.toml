@@ -4,10 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-datafusion = "38.0"
+common = { path = "../common" }
+datafusion = "54.1.0"
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 axum = "0.8"
 serde.workspace = true
 serde_json.workspace = true
+iceberg.workspace = true
+iceberg-catalog-sql.workspace = true
+sqlx.workspace = true
+iceberg-datafusion = "0.11.0"
+anyhow = "1.0.104"
+tokio-stream = "0.1.19"
