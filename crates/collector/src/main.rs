@@ -1,7 +1,10 @@
 mod input;
 mod parser;
+mod std_input;
+mod file_input;
 
-use crate::input::{LogInput, StdinInput};
+use crate::input::LogInput;
+use crate::std_input::StdinInput;
 use crate::parser::EventParser;
 use clap::Parser;
 use tokio::sync::mpsc;
@@ -10,6 +13,7 @@ use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 use common::log_system::log_ingestion_service_client::LogIngestionServiceClient;
 use common::log_system::LogEvent as ProtoLogEvent;
+use crate::file_input::FileInput;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -20,7 +24,15 @@ struct Args {
 
     /// gRPC Ingestion service url
     #[arg(long, default_value = "http://127.0.0.1:50051")]
-    ingestion_url: String
+    ingestion_url: String,
+
+    /// Optional file glob pattern (e.g. "data/logs/*.log"). If omitted, reads from STDIN.
+    #[arg(short, long)]
+    pub path: Option<String>,
+
+    /// Poll interval in case reading from file
+    #[arg(long, default_value = "500")]
+    poll_interval: u64
 }
 
 
@@ -37,6 +49,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     tracing::subscriber::set_global_default(subscriber)?;
 
+    // Box<dyn InputSource> lets us decide at runtime whether we read from STDIN or Files.
+    let input: Box<dyn LogInput> = match args.path {
+        Some(glob_pattern) => Box::new(FileInput::new(glob_pattern, args.poll_interval)),
+        None => Box::new(StdinInput)
+    };
+
     // Bounded mpsc channel: buffers up to 1000 lines before applying backpressure
     let (input_tx, mut input_rx) = mpsc::channel::<String>(1000);
     let (grpc_tx, grpc_rx) = mpsc::channel::<ProtoLogEvent>(1000);
@@ -45,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     // Producer task: reads raw lines from stdin
     let input_task = tokio::spawn(async move {
-        let input = StdinInput;
+
         if let Err(e) = input.run(input_tx).await {
             tracing::error!("Input reader error: {}", e);
         }
