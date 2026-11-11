@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package pubsub;
+
+service PubSubService {
+  rpc CreateTopic (CreateTopicRequest) returns (CreateTopicResponse);
+  rpc CreateSubscription (CreateSubscriptionRequest) returns (CreateSubscriptionResponse);
+  rpc CreatePushSubscription (CreatePushSubscriptionRequest) returns (CreateSubscriptionResponse);
+  rpc Publish (PublishRequest) returns (PublishResponse);
+
+  // Bidirectional streaming endpoint for real-time push delivery & inline Acks
+  rpc StreamingPull(stream StreamingPullRequest) returns (stream StreamingPullResponse);
+}
+
+message DeadLetterPolicy {
+  string dead_letter_queue = 1;
+  optional uint32 max_delivery_attempts = 2;
+}
+
+message CreateTopicRequest {
+  string topic = 1;
+}
+
+message CreateTopicResponse {
+  bool success = 1;
+}
+
+
+message CreateSubscriptionRequest {
+  string topic = 1;
+  string subscription = 2;
+  uint64 ack_deadline_secs = 3;
+  optional uint32 batch_size = 4;
+  optional uint32 max_outstanding_messages = 5;
+  optional uint64 message_ttl_secs = 6;
+  optional DeadLetterPolicy dead_letter_policy = 7;
+}
+
+message CreateSubscriptionResponse {
+  bool success = 1;
+}
+
+
+message CreatePushSubscriptionRequest {
+  string topic = 1;
+  string subscription = 2;
+  uint64 ack_deadline_secs = 3;
+  string push_endpoint = 4;
+  map<string, string> headers = 5;
+  optional uint32 batch_size = 6;
+  optional uint64 timeout_secs = 7;
+  optional uint32 max_outstanding_messages = 8;
+  optional uint64 message_ttl_secs = 9;
+  optional DeadLetterPolicy dead_letter_policy = 10;
+}
+
+message PublishRequest {
+  string topic = 1;
+  bytes payload = 2;
+  map<string, string> attributes = 3;
+}
+
+message PublishResponse {
+  string message_id = 1;
+}
+
+message Message {
+  string id = 1;
+  bytes payload = 2;
+  map<string, string> attributes = 3;
+  uint32 delivery_attempt = 4;
+}
+
+message StreamingPullRequest {
+  // First request must set subscription_name
+  string subscription_name = 1;
+  string topic_name = 2;
+
+  // Subsequent streaming requests send ack IDs to retire
+  repeated string ack_ids = 3;
+  repeated string nack_ids = 4;
+  optional uint32 max_messages = 5;
+}
+
+// Server pushes messages directly over the outgoing stream
+message StreamingPullResponse {
+  repeated Message messages = 1;
+}
