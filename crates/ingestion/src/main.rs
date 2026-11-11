@@ -3,12 +3,14 @@ mod buffer;
 mod arrow;
 mod parquet_writer;
 mod iceberg_catalog;
+mod sql_catalog;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use clap::builder::Str;
 use tokio::sync::mpsc;
-use clap::Parser;
+use clap::{arg, Parser};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use crate::service::{run_batch_flusher, IngestionServer};
@@ -17,6 +19,7 @@ use tonic::transport::Server;
 use common::log_system::log_ingestion_service_server::LogIngestionServiceServer;
 use common::log_system::LogEvent;
 use crate::buffer::BatchConfig;
+use crate::sql_catalog::PostgresIcebergCatalogManger;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -31,8 +34,18 @@ struct Args {
     #[arg(short, long, default_value = "5")]
     flush_interval: u64,
 
-    #[arg(short, long, default_value = "data/parquet")]
-    output_dir: String
+    #[arg(short, long, default_value = "postgres://postgres:postgres@localhost:5432/iceberg_catalog")]
+    database_url: String,
+
+    #[arg(short, long, default_value = "data/iceberg_warehouse")]
+    warehouse_dir: String,
+
+    #[arg(short, long, default_value = "log_db")]
+    namespace: String,
+
+    #[arg(short, long, default_value = "log_events")]
+    table: String,
+
 }
 
 
@@ -48,7 +61,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     let max_batch_size = args.batch_size;
     let max_flush_interval = args.flush_interval;
-    let output_dir = args.output_dir;
+    let warehouse_dir = args.warehouse_dir;
+    let postgres_url = args.database_url;
+    let namespace = args.namespace;
+    let table = args.table;
 
     let (tx, rx) = mpsc::channel::<LogEvent>(1000);
     let config = BatchConfig{
@@ -56,8 +72,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         max_flush_interval: Duration::from_secs(max_flush_interval)
     };
 
+    // Database & Catalog Configuration
+    let catalog_manager = Arc::new(
+        PostgresIcebergCatalogManger::new(&postgres_url, &warehouse_dir, &namespace, &table)
+            .await
+            .map_err(anyhow::Error::from_boxed)?
+    );
+
     // Spawn background micro-batching flusher task
-    tokio::spawn(run_batch_flusher(rx, config, output_dir));
+    let catalog_clone = Arc::clone(&catalog_manager);
+    let output_dir = format!("{warehouse_dir}/{namespace}/{table}/data");
+    tokio::spawn(run_batch_flusher(rx, config, output_dir, catalog_clone));
 
     let addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse()?;
     let service = IngestionServer::new(tx);

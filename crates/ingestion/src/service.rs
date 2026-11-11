@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 use arrow::array::RecordBatch;
 use arrow::error::ArrowError;
@@ -11,6 +12,7 @@ use crate::arrow::events_record_batch;
 use crate::buffer::{BatchConfig, LogBuffer};
 use crate::iceberg_catalog::IcebergCatalogManager;
 use crate::parquet_writer::ParquetWriter;
+use crate::sql_catalog::PostgresIcebergCatalogManger;
 
 #[derive(Debug)]
 pub struct IngestionServer {
@@ -52,7 +54,7 @@ impl LogIngestionService for IngestionServer {
 }
 
 
-pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchConfig, output_dir: String) {
+pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchConfig, output_dir: String, catalog: Arc<PostgresIcebergCatalogManger>) {
     let interval_sec = config.max_flush_interval.as_secs();
     let mut buffer = LogBuffer::new(config);
     let mut ticker = interval(Duration::from_secs(interval_sec));
@@ -64,7 +66,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
                 match maybe_event {
                     Some(event) => {
                         if let Some(batch) = buffer.push(event) {
-                            flush_batch(batch, &output_dir).await;
+                            flush_batch(batch, &output_dir, &catalog).await;
                             ticker.reset();
                         }
                     }
@@ -72,7 +74,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
                         // gRPC stream closed: flush any remaining logs and exit
                         let final_batch = buffer.drain();
                         if !final_batch.is_empty() {
-                            flush_batch(final_batch, &output_dir).await;
+                            flush_batch(final_batch, &output_dir, &catalog).await;
                         }
                         break;
                     }
@@ -84,7 +86,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
                 let batch = buffer.drain();
                 if !batch.is_empty() {
                     info!("Flush triggered by timer timeout (count: {})", batch.len());
-                    flush_batch(batch, &output_dir).await;
+                    flush_batch(batch, &output_dir, &catalog).await;
                 }
             }
         }
@@ -93,7 +95,7 @@ pub async fn run_batch_flusher(mut rx: mpsc::Receiver<LogEvent>, config: BatchCo
 }
 
 
-async fn flush_batch(batch: Vec<LogEvent>, output_dir: &str) {
+async fn flush_batch(batch: Vec<LogEvent>, output_dir: &str, pg_catalog: &PostgresIcebergCatalogManger) {
     let count = batch.len();
     info!(target: "ingestion", "Flushing micro-batch of {} events...", count);
 
@@ -117,7 +119,14 @@ async fn flush_batch(batch: Vec<LogEvent>, output_dir: &str) {
                         data_file.file_path(),
                         data_file.record_count()
                     );
+                    // Execute atomic SQL transaction commit to Postgres SqlCatalog
+                    if let Err(e) = pg_catalog.commit_data_file(data_file).await {
+                        error!(target: "ingestion", "Failed to commit Iceberg snapshot transaction to Postgres: {}", e);
+                    }
                 }
+
+
+
                 Err(err) => {
                     error!(target: "ingestion", "Failed to write Parquet file: {}", err);
                 }
